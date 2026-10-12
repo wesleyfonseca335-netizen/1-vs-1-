@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>CrossFire 3D - Mouse Pro</title>
+    <style>
+        body { margin: 0; padding: 0; background: #000; overflow: hidden; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; }
+        canvas { background: #111; border: 4px solid #333; box-shadow: 0 0 30px rgba(0,0,0,0.8); cursor: none; }
+        
+        /* Mira Verde Clássica de FPS Competitivo */
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); pointer-events: none; }
+        #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #00ff00; }
+        #crosshair::before { top: 9px; left: -5px; width: 30px; height: 2px; }
+        #crosshair::after { top: -5px; left: 9px; width: 2px; height: 30px; }
+        
+        #hud { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 40px; background: rgba(0,0,0,0.85); color: #fff; padding: 10px 30px; border-radius: 4px; font-size: 20px; font-weight: bold; border-bottom: 3px solid #00ff00; pointer-events: none; width: 600px; justify-content: space-between; }
+        #tela-bloqueio { position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; text-align: center; }
+        #tela-bloqueio h2 { color: #00ffaa; margin-bottom: 5px; }
+        kbd { background: #333; padding: 2px 6px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <div id="tela-bloqueio" id="trava">
+        <h2>CROSSFIRE WEB 3D</h2>
+        <p>Clique em qualquer lugar da tela para travar o mouse e jogar!</p>
+        <p style="color:#888; font-size:12px;"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Anda | <kbd>Mouse</kbd> Mira | <kbd>Clique Esquerdo</kbd> Atira</p>
+    </div>
+
+    <div id="hud">
+        <div style="color:#00ffaa;">HP: 100</div>
+        <div style="color:#ffcc00;">REMANESCENTE: <span id="txtKills">0</span></div>
+        <div style="color:#ff3b30;">ARMA: AK-47</div>
+    </div>
+
+    <div id="crosshair"></div>
+    <canvas id="gameCanvas" width="960" height="540"></canvas>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const telaBloqueio = document.getElementById("tela-bloqueio");
+
+        // Sistema de Trava do Mouse (Pointer Lock igual ao CrossFire/CS)
+        document.body.addEventListener("click", () => {
+            document.body.requestPointerLock();
+        });
+        document.addEventListener("pointerlockchange", () => {
+            if (document.pointerLockElement === document.body) telaBloqueio.style.display = "none";
+            else telaBloqueio.style.display = "flex";
+        });
+
+        // Configurações Físicas do Jogador
+        let px = 3.5, py = 3.5;       // Posição no labirinto
+        let anguloVisao = 0;          // Ângulo horizontal olhado pelo mouse
+        let olharCimaBaixo = 0;       // Limite vertical de visão
+        let velMov = 0.06;
+        let pontos = 0;
+
+        let atirando = false, flashArma = false, cooldownTiro = 0;
+
+        // Mapa Tático (1 = Paredes Cinzas de Concreto, 2 = Caixas de Madeira)
+        const mapa = [,
+,
+,
+,
+,
+,
+,
+,
+,
+           
+        ];
+
+        // Escuta de Teclado e Mouse
+        const teclas = {};
+        window.addEventListener("keydown", e => teclas[e.key.toLowerCase()] = true);
+        window.addEventListener("keyup", e => teclas[e.key.toLowerCase()] = false);
+        
+        window.addEventListener("mousedown", e => { if(e.button === 0) atirando = true; });
+        window.addEventListener("mouseup", e => { if(e.button === 0) atirando = false; });
+
+        // Captura o movimento livre do mouse em 360°
+        window.addEventListener("mousemove", e => {
+            if (document.pointerLockElement !== document.body) return;
+            anguloVisao += e.movementX * 0.0025; // Sensibilidade horizontal
+            olharCimaBaixo -= e.movementY * 1.5;  // Sensibilidade vertical
+            if(olharCimaBaixo > 160) olharCimaBaixo = 160;
+            if(olharCimaBaixo < -160) olharCimaBaixo = -160;
+        });
+
+        function loop() {
+            // 1. CÁLCULO DE MOVIMENTAÇÃO DIRECIONAL (WASD baseado para onde você olha)
+            let cos = Math.cos(anguloVisao);
+            let sin = Math.sin(anguloVisao);
+
+            if (teclas["w"]) {
+                if(mapa[Math.floor(py)][Math.floor(px + cos * velMov)] === 0) px += cos * velMov;
+                if(mapa[Math.floor(py + sin * velMov)][Math.floor(px)] === 0) py += sin * velMov;
+            }
+            if (teclas["s"]) {
+                if(mapa[Math.floor(py)][Math.floor(px - cos * velMov)] === 0) px -= cos * velMov;
+                if(mapa[Math.floor(py - sin * velMov)][Math.floor(px)] === 0) py -= sin * velMov;
+            }
+            if (teclas["a"]) { // Strafe para a esquerda
+                if(mapa[Math.floor(py)][Math.floor(px + sin * velMov)] === 0) px += sin * velMov;
+                if(mapa[Math.floor(py - cos * velMov)][Math.floor(px)] === 0) py -= cos * velMov;
+            }
+            if (teclas["d"]) { // Strafe para a direita
+                if(mapa[Math.floor(py)][Math.floor(px - sin * velMov)] === 0) px -= sin * velMov;
+                if(mapa[Math.floor(py + cos * velMov)][Math.floor(px)] === 0) py += cos * velMov;
+            }
+
+            // Sistema de Tiros e Balas
+            if (atirando && cooldownTiro === 0) {
+                flashArma = true;
+                cooldownTiro = 5; // Ritmo veloz da AK-47
+                pontos += 15; // Simula ganho de score
+            }
+            if(cooldownTiro > 0) {
+                cooldownTiro--;
+                if(cooldownTiro < 3) flashArma = false;
+            }
+
+            // 2. RENDERIZAÇÃO GRÁFICA 3D (RAYCASTING ENGINE)
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Céu Azul Escuro de Arena
+            ctx.fillStyle = "#1a2230";
+            ctx.fillRect(0, 0, canvas.width, canvas.height / 2 + olharCimaBaixo);
+
+            // Chão de Areia/Cimento do Mapa
+            ctx.fillStyle = "#3e423a";
+            ctx.fillRect(0, canvas.height / 2 + olharCimaBaixo, canvas.width, canvas.height / 2 - olharCimaBaixo);
+
+            // Projeção das paredes baseadas no ângulo do mouse
+            let fov = 0.66; // Campo de visão
+            for (let x = 0; x < canvas.width; x++) {
+                let cameraX = 2 * x / canvas.width - 1;
+                let raioDirX = cos + (-sin) * fov * cameraX;
+                let raioDirY = sin + cos * fov * cameraX;
+
+                let mapaX = Math.floor(px);
+                let mapaY = Math.floor(py);
+                let ladoDistX, ladoDistY;
+
+                let deltaDistX = Math.abs(1 / raioDirX);
+                let deltaDistY = Math.abs(1 / raioDirY);
+                let perpWallDist;
+                let stepX, stepY, hit = 0, lado;
+
+                if (raioDirX < 0) { stepX = -1; ladoDistX = (px - mapaX) * deltaDistX; } 
+                else { stepX = 1; ladoDistX = (mapaX + 1.0 - px) * deltaDistX; }
+                if (raioDirY < 0) { stepY = -1; ladoDistY = (py - mapaY) * deltaDistY; } 
+                else { stepY = 1; ladoDistY = (mapaY + 1.0 - py) * deltaDistY; }
+
+                while (hit === 0) {
+                    if (ladoDistX < ladoDistY) { ladoDistX += deltaDistX; mapaX += stepX; lado = 0; } 
+                    else { ladoDistY += deltaDistY; mapaY += stepY; lado = 1; }
+                    if (mapa[mapaY][mapaX] > 0) hit = 1;
+                }
+
+                perpWallDist = (lado === 0) ? (ladoDistX - deltaDistX) : (ladoDistY - deltaDistY);
+                let alturaLinha = Math.floor(canvas.height / perpWallDist);
+
+                let inicioDesenho = -alturaLinha / 2 + canvas.height / 2 + olharCimaBaixo;
+                if (inicioDesenho < 0) inicioDesenho = 0;
+                let fimDesenho = alturaLinha / 2 + canvas.height / 2 + olharCimaBaixo;
+                if (fimDesenho >= canvas.height) fimDesenho = canvas.height - 1;
+
+                // Cores baseadas nas texturas do CrossFire (Caixas de Madeira vs Paredes)
+                let corBloco;
+                if (mapa[mapaY][mapaX] === 1) {
+                    corBloco = lado === 1 ? "#555b66" : "#727a8a"; // Paredes de Concreto Cinza
+                } else {
+                    corBloco = lado === 1 ? "#946638" : "#bd864c"; // Caixas Militares de Madeira
+                }
+
+                ctx.strokeStyle = corBloco;
+                ctx.beginPath(); ctx.moveTo(x, inicioDesenho); ctx.lineTo(x, fimDesenho); ctx.stroke();
+            }
+
+            // 3. RENDERIZAÇÃO GRÁFICA DA ARMA AK-47 NA TELA
+            let balancoX = flashArma ? Math.random() * 10 - 5 : 0;
+            let recuoY = flashArma ? 20 : 0;
+
+            ctx.save();
+            ctx.translate(canvas.width / 2 + 120 + balancoX, canvas.height - 180 - recuoY);
+
+            // Desenho geométrico simulando o corpo de madeira e metal da AK-47
+            ctx.fillStyle = "#4a2a18"; // Coronha e empunhadura de madeira
+            ctx.fillRect(-40, 60, 45, 120); 
+            ctx.fillStyle = "#1c1d21"; // Corpo de metal central
+            ctx.fillRect(-65, 20, 80, 55); 
+            ctx.fillStyle = "#4a2a18"; // Protetor de mão frontal de madeira
+            ctx.fillRect(-140, 25, 75, 30);
+            ctx.fillStyle = "#111113"; // Cano longo de metal da AK
+            ctx.fillRect(-260, 28, 120, 12);
+            ctx.fillStyle = "#222";    // Carregador curvado clássico
+            ctx.fillRect(-30, 70, 30, 75);
+
+            // Flash luminoso do disparo na ponta do cano
+            if (flashArma) {
+                ctx.fillStyle = "#ffbb00";
+                ctx.beginPath(); ctx.arc(-275, 34, 30, 0, Math.PI * 2); ctx.fill();
